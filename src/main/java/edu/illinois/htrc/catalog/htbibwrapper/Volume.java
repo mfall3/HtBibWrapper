@@ -39,12 +39,11 @@ import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 
-
 @Path("vol")
 public class Volume {
 
     private final String endpoint = "http://catalog.hathitrust.org/api/volumes/full/htid/";
-    
+
     private final JSONParser parser = new JSONParser();
 
     private final DocumentBuilderFactory docFactory = DocumentBuilderFactory.newInstance();
@@ -54,10 +53,105 @@ public class Volume {
     @GET
     @Path("{volumeId}")
     public String getHTMarcByVolumeId(@PathParam("volumeId") String volumeId) {
-        StringBuilder stringBuilder = new StringBuilder("HT Bib Wrapper | Hello ");
-        stringBuilder.append(volumeId).append("!");
 
-        return stringBuilder.toString();
+        //get the volumeId from the URI path
+        String id = volumeId;
+
+        //set the default returnString
+        String returnString = "error";
+        
+        //if anything in this block fails, the whole process should end
+        try{
+
+            //make an XML document for the record
+            DocumentBuilder docBuilder = null;
+            docBuilder = docFactory.newDocumentBuilder();
+            DOMImplementation domImplementation = docBuilder.getDOMImplementation();
+            Document returnDoc = docBuilder.newDocument();
+            Document tempDoc = null;
+            Node tempNode = null;
+            Element rootElement = returnDoc.createElementNS("http://www.loc.gov/MARC21/slim", "record");
+            returnDoc.appendChild(rootElement);
+
+            //call the HathiTrust Bib API
+            String charset = "UTF-8";
+            URL url = new URL(endpoint + id + ".json");
+            URLConnection connection = url.openConnection();
+            connection.setRequestProperty("Accept-Charset", charset);
+            InputStream response = connection.getInputStream();
+
+            //read the response as a string from the HathiTrust Bib API
+            BufferedReader reader = new BufferedReader(new InputStreamReader(response));
+            StringBuilder builder = new StringBuilder();
+            for (String line = null; (line = reader.readLine()) != null;) {
+                builder.append(line).append("\n");
+            }
+
+            //parse the string as JSON
+            JsonElement jelement = new JsonParser().parse(builder.toString());
+            JsonObject jobject = jelement.getAsJsonObject();
+            JsonObject recordJsonObject = jobject.getAsJsonObject("records");
+            System.out.println(recordJsonObject.getAsJsonObject());
+            HashMap<String, JsonObject> map = new HashMap<String, JsonObject>();
+            map = gson.fromJson(recordJsonObject.toString(), map.getClass());
+            ArrayList<String> keyStringArray = new ArrayList<String>();
+            for (String key : map.keySet()) {
+                keyStringArray.add(key);
+            }
+
+            if (keyStringArray.size() > 0) {
+
+                JsonObject recordJson = recordJsonObject.getAsJsonObject(keyStringArray.get(0));
+                
+                //extract the marc-xml part of the json response
+                String xmlString = recordJson.get("marc-xml").getAsString();
+                InputSource inputSource = new InputSource();
+                //test - System.out.println("xmlString: " + xmlString);
+
+                inputSource.setCharacterStream(new StringReader(xmlString));
+                tempDoc = docBuilder.parse(inputSource);
+
+                // get record node
+                tempNode = returnDoc.importNode(tempDoc.getFirstChild().getFirstChild(), true);
+
+                // get children of record, add to created record element
+                // to use a namespace
+                NodeList recordChildren = tempNode.getChildNodes();
+
+                for (int i = 0; i < recordChildren.getLength(); i++) {
+                    Node recordChild = recordChildren.item(i);
+                    returnDoc.getDocumentElement().appendChild(recordChild);
+                }
+            } else {
+                System.out.println(keyStringArray);
+            }
+            //transform the xml document to a string
+            TransformerFactory tf = TransformerFactory.newInstance();
+            Transformer transformer = tf.newTransformer();
+
+            StringWriter writer = new StringWriter();
+            transformer.transform(new DOMSource(returnDoc), new StreamResult(writer));
+            String output = writer.getBuffer().toString().replaceAll("\n|\r", "");
+            returnString = output;
+            
+        } catch (TransformerException ex) {
+            Logger.getLogger(Volume.class.getName()).log(Level.SEVERE, null, ex);
+            returnString = "internal error processing request";
+        } catch (ParserConfigurationException ex) {
+            Logger.getLogger(Volume.class.getName()).log(Level.SEVERE, null, ex);
+            returnString = "internal error processing request";
+        } catch (MalformedURLException ex) {
+            Logger.getLogger(Volume.class.getName()).log(Level.SEVERE, null, ex);
+            returnString = "internal error processing request";
+        } catch (IOException ex) {
+            Logger.getLogger(Volume.class.getName()).log(Level.SEVERE, null, ex);
+            returnString = "internal error processing request";
+        } catch (SAXException ex) {
+            Logger.getLogger(Volume.class.getName()).log(Level.SEVERE, null, ex);
+            returnString = "internal error processing request";
+        }
+
+        return returnString;
     }
 
 }
